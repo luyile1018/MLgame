@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>ML游戏：模型抢救计划</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #050505;
+            color: #00ff00;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            overflow: hidden;
+        }
+        
+        /* 顶部状态栏 */
+        .hud {
+            width: 80%;
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: rgba(0, 20, 0, 0.8);
+            border: 1px solid #00ff00;
+            border-radius: 8px;
+            box-shadow: 0 0 15px rgba(0, 255, 0, 0.2);
+            z-index: 10;
+        }
+        .stat-box { font-size: 1.2rem; }
+        .danger { color: #ff3333; animation: blink 1s infinite; }
+        
+        /* 游戏主区域 */
+        #networkCanvas {
+            border: 1px solid #333;
+            background: radial-gradient(circle, #111 0%, #000 100%);
+            border-radius: 8px;
+            box-shadow: 0 0 30px rgba(0, 255, 0, 0.05);
+        }
+
+        /* 按钮 */
+        #fixBtn {
+            margin-top: 20px;
+            padding: 15px 40px;
+            font-size: 20px;
+            background-color: #003300;
+            color: #00ff00;
+            border: 2px solid #00ff00;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: 0.3s;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            font-weight: bold;
+        }
+        #fixBtn:hover { background-color: #00ff00; color: #000; box-shadow: 0 0 20px #00ff00; }
+        #fixBtn:disabled { border-color: #555; color: #555; background: #111; cursor: not-allowed; }
+
+        /* 问答弹窗 */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.85);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+        }
+        .modal {
+            background: #111;
+            border: 2px solid #00ff00;
+            padding: 30px;
+            width: 500px;
+            border-radius: 10px;
+            box-shadow: 0 0 50px rgba(0, 255, 0, 0.3);
+            text-align: center;
+        }
+        .question-text { font-size: 1.4rem; margin-bottom: 25px; color: #fff; }
+        .options { display: flex; flex-direction: column; gap: 10px; }
+        .option-btn {
+            padding: 12px;
+            background: #002200;
+            border: 1px solid #005500;
+            color: #ccc;
+            cursor: pointer;
+            font-size: 1rem;
+            text-align: left;
+            transition: 0.2s;
+        }
+        .option-btn:hover { background: #004400; border-color: #00ff00; color: #fff; }
+
+        /* 动画关键帧 */
+        @keyframes blink { 50% { opacity: 0.5; } }
+        
+        /* 结束画面 */
+        #gameOverScreen {
+            display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: black; flex-direction: column; justify-content: center; align-items: center; z-index: 200;
+        }
+        h1 { font-size: 3rem; margin: 0; }
+    </style>
+</head>
+<body>
+
+    <div class="hud">
+        <div class="stat-box">模型准确率: <span id="accuracyDisplay">95.0</span>%</div>
+        <div class="stat-box">已修复次数: <span id="scoreDisplay">0</span></div>
+        <div class="stat-box">状态: <span id="statusText">运行平稳</span></div>
+    </div>
+
+    <canvas id="networkCanvas" width="800" height="400"></canvas>
+
+    <button id="fixBtn" onclick="openQuestion()">🛠️ 介入微调 (Fix Model)</button>
+
+    <div class="modal-overlay" id="quizModal">
+        <div class="modal">
+            <h3 style="color:#00ff00; margin-top:0;">/// 系统警报：请选择正确策略 ///</h3>
+            <div class="question-text" id="qText">Question goes here...</div>
+            <div class="options" id="qOptions">
+                </div>
+        </div>
+    </div>
+
+    <div id="gameOverScreen">
+        <h1 style="color: #ff3333;">SYSTEM FAILURE</h1>
+        <p style="color: #fff; font-size: 1.5rem; margin-top: 20px;">模型崩溃，公司破产。</p>
+        <p style="color: #888;">最终得分: <span id="finalScore">0</span></p>
+        <button id="fixBtn" onclick="location.reload()" style="margin-top:30px;">重启系统</button>
+    </div>
+
+<script>
+    // --- 1. 题库 (结合机器学习与简单营销概念) ---
+    const questions = [
+        {
+            q: "你想训练一个模型来区分'猫'和'狗'，你需要给图片打上标签。这种学习方式叫什么？",
+            options: ["A. 无监督学习 (Unsupervised)", "B. 监督学习 (Supervised)", "C. 强化学习 (Reinforcement)"],
+            ans: 1 // B
+        },
+        {
+            q: "你的模型在训练集上表现完美(100%)，但在新数据上表现很差。这叫什么？",
+            options: ["A. 欠拟合 (Underfitting)", "B. 过拟合 (Overfitting)", "C. 最优解 (Optimal)"],
+            ans: 1 // B
+        },
+        {
+            q: "作为营销人员，你想根据用户的购买历史把他们分成不同的'群体'，但不知道具体有哪些群体。应该用？",
+            options: ["A. 聚类 (Clustering/无监督)", "B. 分类 (Classification/监督)", "C. 回归 (Regression)"],
+            ans: 0 // A
+        },
+        {
+            q: "房价预测：通过房屋面积预测具体的房价金额。这是一个什么问题？",
+            options: ["A. 分类问题 (是/否)", "B. 回归问题 (数值)", "C. 聚类问题"],
+            ans: 1 // B
+        },
+        {
+            q: "神经网络中，模拟人脑神经元并决定是否向下传递信号的数学函数叫什么？",
+            options: ["A. 激活函数 (Activation Function)", "B. 损失函数 (Loss Function)", "C. 优化器 (Optimizer)"],
+            ans: 0 // A
+        },
+        {
+            q: "你想让AI根据用户的点击行为推荐商品，如果用户点击了推荐商品，AI获得+1分。这是？",
+            options: ["A. 监督学习", "B. 强化学习 (Reinforcement Learning)", "C. 深度学习"],
+            ans: 1 // B
+        },
+        {
+            q: "为了防止模型'死记硬背' (过拟合)，你可以做什么？",
+            options: ["A. 增加更多复杂的参数", "B. 减少训练数据", "C. 数据增强 (Data Augmentation) 或 正则化"],
+            ans: 2 // C
+        },
+        {
+            q: "在训练神经网络时，用来衡量模型预测值与真实值差距的是？",
+            options: ["A. 准确率 (Accuracy)", "B. 权重 (Weight)", "C. 损失/代价 (Loss/Cost)"],
+            ans: 2 // C
+        }
+    ];
+
+    // --- 2. 游戏核心变量 ---
+    let accuracy = 95.0;
+    let score = 0;
+    let decayRate = 0.05; // 初始衰减速度
+    let isGameActive = true;
+    let isPaused = false;
+    
+    // UI 元素
+    const accDisplay = document.getElementById('accuracyDisplay');
+    const scoreDisplay = document.getElementById('scoreDisplay');
+    const statusText = document.getElementById('statusText');
+    const modal = document.getElementById('quizModal');
+    const qText = document.getElementById('qText');
+    const qOptions = document.getElementById('qOptions');
+    const gameOverScreen = document.getElementById('gameOverScreen');
+    const finalScore = document.getElementById('finalScore');
+
+    // --- 3. 视觉效果 (Canvas 神经网络) ---
+    const canvas = document.getElementById('networkCanvas');
+    const ctx = canvas.getContext('2d');
+    
+    // 生成简单的网络结构节点
+    const layers = [3, 5, 5, 2]; // 输入层3个，隐藏层5个，输出层2个
+    let nodes = [];
+    let connections = [];
+
+    function initNetwork() {
+        nodes = [];
+        connections = [];
+        const layerGap = canvas.width / (layers.length + 1);
+        
+        layers.forEach((nodeCount, layerIndex) => {
+            const x = (layerIndex + 1) * layerGap;
+            const yGap = canvas.height / (nodeCount + 1);
+            for(let i=0; i<nodeCount; i++) {
+                nodes.push({
+                    x: x,
+                    y: (i + 1) * yGap,
+                    layer: layerIndex,
+                    active: Math.random() // 用于闪烁动画
+                });
+            }
+        });
+
+        // 建立连线
+        for(let i=0; i<nodes.length; i++) {
+            for(let j=0; j<nodes.length; j++) {
+                if(nodes[j].layer === nodes[i].layer + 1) {
+                    connections.push({
+                        start: nodes[i],
+                        end: nodes[j],
+                        pulse: Math.random() // 用于传输数据的动画
+                    });
+                }
+            }
+        }
+    }
+
+    // --- 4. 游戏循环 ---
+    function loop() {
+        if (!isGameActive) return;
+        
+        if (!isPaused) {
+            // 准确率自然衰减 (模拟模型老化/数据漂移)
+            // 随着分数越高，衰减越快（难度增加）
+            let currentDecay = decayRate + (score * 0.005);
+            accuracy -= currentDecay;
+            
+            if(accuracy > 100) accuracy = 100;
+            if (accuracy <= 0) {
+                endGame();
+            }
+        }
+
+        // 更新UI
+        accDisplay.innerText = accuracy.toFixed(2);
+        scoreDisplay.innerText = score;
+
+        // 状态文字颜色变化
+        if(accuracy > 80) {
+            accDisplay.style.color = "#00ff00";
+            statusText.innerText = "运行平稳";
+            statusText.style.color = "#00ff00";
+        } else if (accuracy > 50) {
+            accDisplay.style.color = "yellow";
+            statusText.innerText = "需要维护";
+            statusText.style.color = "yellow";
+        } else {
+            accDisplay.style.color = "red";
+            statusText.innerText = "CRITICAL WARNING";
+            statusText.style.color = "red";
+        }
+
+        drawNetwork();
+        requestAnimationFrame(loop);
+    }
+
+    // --- 5. 绘图逻辑 ---
+    function drawNetwork() {
+        // 清空背景
+        ctx.fillStyle = "rgba(0, 0, 0, 0.2)"; // 拖影效果
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // 绘制连线
+        ctx.lineWidth = 1;
+        connections.forEach(conn => {
+            conn.pulse += 0.05; // 移动速度
+            if(conn.pulse > 1) conn.pulse = 0;
+
+            // 基础线
+            ctx.strokeStyle = accuracy > 50 ? "#003300" : "#330000";
+            ctx.beginPath();
+            ctx.moveTo(conn.start.x, conn.start.y);
+            ctx.lineTo(conn.end.x, conn.end.y);
+            ctx.stroke();
+
+            // 数据包动画 (一个小白点顺着线跑)
+            let dx = conn.end.x - conn.start.x;
+            let dy = conn.end.y - conn.start.y;
+            let px = conn.start.x + dx * conn.pulse;
+            let py = conn.start.y + dy * conn.pulse;
+
+            ctx.fillStyle = accuracy > 50 ? "#00ff00" : "#ff0000";
+            ctx.beginPath();
+            ctx.arc(px, py, 2, 0, Math.PI*2);
+            ctx.fill();
+        });
+
+        // 绘制节点
+        nodes.forEach(node => {
+            ctx.beginPath();
+            ctx.arc(node.x, node.y, 6, 0, Math.PI * 2);
+            ctx.fillStyle = accuracy > 50 ? "#00aa00" : "#aa0000";
+            ctx.fill();
+            ctx.strokeStyle = "#fff";
+            ctx.stroke();
+        });
+    }
+
+    // --- 6. 交互逻辑 (问答) ---
+    function openQuestion() {
+        if(!isGameActive) return;
+        isPaused = true; // 暂停游戏，让玩家思考
+        
+        // 随机取题
+        const randomIndex = Math.floor(Math.random() * questions.length);
+        const qData = questions[randomIndex];
+
+        qText.innerText = qData.q;
+        qOptions.innerHTML = "";
+
+        qData.options.forEach((opt, index) => {
+            const btn = document.createElement('div');
+            btn.className = 'option-btn';
+            btn.innerText = opt;
+            btn.onclick = () => checkAnswer(index, qData.ans);
+            qOptions.appendChild(btn);
+        });
+
+        modal.style.display = "flex";
+    }
+
+    function checkAnswer(selected, correct) {
+        modal.style.display = "none";
+        isPaused = false; // 恢复游戏
+
+        if (selected === correct) {
+            // 答对了
+            accuracy += 15; // 补血
+            score++;
+            statusText.innerText = "模型优化成功！";
+            // 简单的视觉反馈
+            document.body.style.backgroundColor = "#002200";
+            setTimeout(() => document.body.style.backgroundColor = "#050505", 200);
+        } else {
+            // 答错了
+            accuracy -= 15; // 扣血
+            statusText.innerText = "引入了BUG！";
+            document.body.style.backgroundColor = "#330000";
+            setTimeout(() => document.body.style.backgroundColor = "#050505", 200);
+        }
+    }
+
+    function endGame() {
+        isGameActive = false;
+        finalScore.innerText = score;
+        gameOverScreen.style.display = "flex";
+        document.querySelector('.hud').style.display = 'none';
+    }
+
+    // 启动
+    initNetwork();
+    loop();
+
+</script>
+</body>
+</html>
